@@ -92,7 +92,11 @@ public class TServerSocket extends TSocket_base {
     TSocket sc;
     lock.lock();
     try {
-      throw new RuntimeException("//Completar...");
+        while(this.acceptQueue.empty())
+        try{
+            this.appCV.await();
+        } catch(Exception ex){}        
+        return this.acceptQueue.get();
     } finally {
       lock.unlock();
     }
@@ -112,7 +116,20 @@ public class TServerSocket extends TSocket_base {
       switch (state) {
         case LISTEN: {
           if (rseg.isSyn()) {
-            throw new RuntimeException("//Completar...");
+              
+              TSocket ts = new TSocket(proto,rseg.getDestinationPort(),rseg.getSourcePort());
+              ts.state = ESTABLISHED;
+              
+              proto.addActiveTSocket(ts);
+              this.acceptQueue.put(ts);
+              this.appCV.signal();
+              
+              TCPSegment seg = new TCPSegment();
+              seg.setDestinationPort(ts.getRemotePort());
+              seg.setSourcePort(localPort);
+              seg.setSyn(true);
+              ts.network.send(seg);
+              printSndSeg(seg);
           }
           break;
         }
