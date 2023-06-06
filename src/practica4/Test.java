@@ -9,7 +9,7 @@ public class Test {
 
   public static void main(String[] args) {
 
-    SimNet_FullDuplex net = new SimNet_FullDuplex();
+    SimNet_FullDuplex net = new SimNet_FullDuplex(0,0);
 
     new Thread(new HostRcv(net.getRcvEnd())).start();
     new Thread(new HostSnd(net.getSndEnd())).start();

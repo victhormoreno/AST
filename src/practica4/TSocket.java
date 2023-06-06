@@ -1,5 +1,7 @@
 package practica4;
 
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import practica1.CircularQ.CircularQueue;
 import util.Const;
 import util.TCPSegment;
@@ -26,15 +28,14 @@ public class TSocket extends TSocket_base {
 
   @Override
   public void sendData(byte[] data, int offset, int length) {
-    int i;
-    for (i = 0; i < (length / this.MSS); i++) {
-        network.send(this.segmentize(data, offset + i * this.MSS, this.MSS));
+    
+    int consume_bytes = 0, consume = 0; 
+    while(consume_bytes<length){
+        consume = Math.min((length - consume_bytes), this.MSS);
+        network.send(this.segmentize(data, offset + consume_bytes, consume));
+        consume_bytes += consume;
     }
-
-    if (length % this.MSS != 0) {
-        network.send(this.segmentize(data, offset + i * this.MSS, length % this.MSS));
-    }  
-  }
+}
 
   protected TCPSegment segmentize(byte[] data, int offset, int length) {
         TCPSegment seg = new TCPSegment();
@@ -95,7 +96,6 @@ public class TSocket extends TSocket_base {
             appCV.signal();
         } 
         if (rseg.isAck()){    
-        //nothing to be done in this exercise.
         }
     } finally {
       lock.unlock();
