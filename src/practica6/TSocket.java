@@ -44,24 +44,66 @@ public class TSocket extends TSocket_base {
     @Override
     public void sendData(byte[] data, int offset, int length) {
         lock.lock();
-        try {
-            throw new RuntimeException("//Completar...");
-        } finally {
+        try {           
+            int consume_bytes = 0, consume = 0; 
+            while(consume_bytes<length){
+                while((this.snd_sndNxt - this.snd_rcvNxt)>=this.snd_minWnd)
+                try{
+                    appCV.await();
+                }catch(Exception e){}
+            
+                TCPSegment seg;
+                if(this.snd_rcvWnd > 0){
+                    consume = Math.min((length - consume_bytes), this.MSS);
+                    this.zero_wnd_probe_ON = false;
+                    seg = this.segmentize(data, offset + consume_bytes, consume);
+                    network.send(seg);
+                    consume_bytes += consume;
+                } else{
+                    consume = 1;
+                    this.zero_wnd_probe_ON = true;
+                    seg = this.segmentize(data, offset + consume_bytes, consume);
+                    consume_bytes += consume;
+                }
+                snd_unacknowledged_segs.put(seg); 
+                super.startRTO();
+                snd_sndNxt++;  
+            }
+        }finally {
             lock.unlock();
         }
     }
 
     protected TCPSegment segmentize(byte[] data, int offset, int length) {
-        throw new RuntimeException("//Completar...");
+        TCPSegment seg = new TCPSegment();
+        seg.setData(data, offset, length);
+        seg.setPsh(true);
+        seg.setSourcePort(localPort);
+        seg.setDestinationPort(remotePort);
+        seg.setSeqNum(this.snd_sndNxt);
+        if(this.snd_rcvWnd > 0) printSndSeg(seg);
+        return seg;  
     }
 
     @Override
     protected void timeout() {
         lock.lock();
-        try {
-            throw new RuntimeException("//Completar...");
+        try{
+            if(!this.snd_unacknowledged_segs.empty()) {
+                Iterator<TCPSegment> ite = this.snd_unacknowledged_segs.iterator();
+                while (ite.hasNext()) {
+                    TCPSegment snd_UnacknowledgedSeg = ite.next();
+                    if(zero_wnd_probe_ON) {
+                        log.printPURPLE("0−wnd probe: " + snd_UnacknowledgedSeg) ;
+                    }else{
+                        log.printPURPLE("retrans: " + snd_UnacknowledgedSeg) ;
+                    }    
+                    network.send(snd_UnacknowledgedSeg);
+                }
+                startRTO();
+            }
         } finally {
-            lock.unlock();
+          lock.unlock();
         }
     }
 
@@ -70,9 +112,16 @@ public class TSocket extends TSocket_base {
     public int receiveData(byte[] buf, int offset, int maxlen) {
         lock.lock();
         try {
-            throw new RuntimeException("//Completar...");
+            while(this.rcv_Queue.empty())
+            try{
+                appCV.await();
+            }catch(Exception e){}
+            int a = 0;
+            while(a<maxlen&&(!this.rcv_Queue.empty()))
+                a += consumeSegment(buf,offset+a,maxlen-a); 
+            return a;
         } finally {
-            lock.unlock();
+          lock.unlock();
         }
     }
 
@@ -89,7 +138,13 @@ public class TSocket extends TSocket_base {
     }
 
     protected void sendAck() {
-        throw new RuntimeException("//Completar...");
+        TCPSegment ack = new TCPSegment();
+        ack.setSourcePort(localPort);
+        ack.setDestinationPort(remotePort);
+        ack.setAck(true);
+        ack.setAckNum(this.rcv_rcvNxt);
+        ack.setWnd(this.rcv_Queue.free());
+        network.send(ack); 
     }
 
     // -------------  SEGMENT ARRIVAL  -------------
@@ -97,11 +152,28 @@ public class TSocket extends TSocket_base {
 
         lock.lock();
         try {
+            printRcvSeg(rseg);
+            if((!this.rcv_Queue.full()&&(rseg.isPsh())&&(rseg.getSeqNum()<=this.rcv_rcvNxt))){
+                // Puting segment in the rcv_Queue
+                this.rcv_Queue.put(rseg);
 
-            throw new RuntimeException("//Completar...");
+                // Updating protocol params and sending ack
+                this.rcv_rcvNxt++;
+                sendAck();
 
+                // wake-up process
+                appCV.signal();
+            } 
+            if (rseg.isAck()&&!this.snd_unacknowledged_segs.empty()){ 
+                while((rseg.getAckNum()-this.snd_rcvNxt)>0){
+                    this.snd_unacknowledged_segs.get();
+                    this.snd_rcvNxt++;
+                }
+                this.snd_rcvWnd = rseg.getWnd(); 
+                appCV.signal();
+            }
         } finally {
-            lock.unlock();
+          lock.unlock();
         }
     }
 
